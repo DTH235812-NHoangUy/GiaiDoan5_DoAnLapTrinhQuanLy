@@ -15,29 +15,42 @@ namespace StadiumTicketBooking.Forms
         StadiumDbContext context = new StadiumDbContext();
         bool xuLyThem = false;
         int currentId;
-
-        // Khai báo biến ở đây, lát vào Constructor mới gán đường dẫn
         string imagesFolder;
 
         public frmSanVanDong()
         {
             InitializeComponent();
 
-            // --- ĐÂY LÀ CHÌA KHÓA GIẢI QUYẾT LỖI GIT ---
-            // Lùi 3 cấp từ bin\Debug\net10.0-windows ra tới thư mục gốc StadiumTicketBooking
-            string projectRootPath = Directory.GetParent(Application.StartupPath).Parent.Parent.FullName;
+            imagesFolder = GetImagesFolder();
 
-            // Ép đường dẫn trỏ thẳng vào thư mục Images\AnhSanVanDong ở ngoài gốc
-            imagesFolder = Path.Combine(projectRootPath, "Images", "AnhSanVanDong");
+            if (!Directory.Exists(imagesFolder))
+                Directory.CreateDirectory(imagesFolder);
 
-            // Nếu thư mục chưa có thì tạo mới
-            if (!Directory.Exists(imagesFolder)) Directory.CreateDirectory(imagesFolder);
-
-            // 1. CHẶN LỖI ĐỊNH DẠNG: DataGridView sẽ không hiện hộp thoại lỗi khi thấy chuỗi string ở cột ảnh
             dgvSanVanDong.DataError += (s, e) => { e.ThrowException = false; };
+            dgvSanVanDong.CellFormatting += new DataGridViewCellFormattingEventHandler(dgvSanVanDong_CellFormatting);
+        }
 
-            // 2. ĐẤU NỐI SỰ KIỆN: Ép chuỗi tên file thành hình ảnh hiển thị trên bảng
-            this.dgvSanVanDong.CellFormatting += new DataGridViewCellFormattingEventHandler(dgvSanVanDong_CellFormatting);
+        private string GetImagesFolder()
+        {
+            // 1. Ưu tiên thư mục Images nằm cạnh file chạy exe
+            string baseDir = Application.StartupPath;
+            string candidate = Path.Combine(baseDir, "Images");
+            if (Directory.Exists(candidate))
+                return candidate;
+
+            // 2. Đi ngược lên các thư mục cha để tìm Images trong thư mục project
+            DirectoryInfo dir = new DirectoryInfo(baseDir);
+            while (dir != null)
+            {
+                candidate = Path.Combine(dir.FullName, "Images");
+                if (Directory.Exists(candidate))
+                    return candidate;
+
+                dir = dir.Parent;
+            }
+
+            // 3. Không tìm thấy thì tạo trong thư mục chạy
+            return Path.Combine(baseDir, "Images");
         }
 
         private void BatTatChucNang(bool dangSua)
@@ -58,8 +71,8 @@ namespace StadiumTicketBooking.Forms
 
         private void dgvSanVanDong_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
         {
-            // Kiểm tra nếu là cột Hình ảnh
-            if (dgvSanVanDong.Columns[e.ColumnIndex].Name == "colHinhAnh" || dgvSanVanDong.Columns[e.ColumnIndex].HeaderText.Contains("Ảnh"))
+            if (dgvSanVanDong.Columns[e.ColumnIndex].Name == "colHinhAnh" ||
+                dgvSanVanDong.Columns[e.ColumnIndex].HeaderText.Contains("Ảnh"))
             {
                 if (e.Value != null && !string.IsNullOrEmpty(e.Value.ToString()))
                 {
@@ -70,20 +83,20 @@ namespace StadiumTicketBooking.Forms
                     {
                         try
                         {
-                            // Đọc file dưới dạng mảng byte để không gây khóa file
                             byte[] bytes = File.ReadAllBytes(path);
                             using (MemoryStream ms = new MemoryStream(bytes))
+                            using (Image img = Image.FromStream(ms))
                             {
-                                Image img = Image.FromStream(ms);
-                                // Tạo bản thu nhỏ (Thumbnail) để GridView không bị giật lag
                                 e.Value = new Bitmap(img, 60, 40);
                             }
                         }
-                        catch { e.Value = null; }
+                        catch
+                        {
+                            e.Value = null;
+                        }
                     }
                     else
                     {
-                        // File không tồn tại trên ổ cứng thì cho null luôn để dgv trống, khỏi lỗi dấu X
                         e.Value = null;
                     }
                 }
@@ -103,7 +116,6 @@ namespace StadiumTicketBooking.Forms
             BindingSource bs = new BindingSource();
             bs.DataSource = listSVD;
 
-            // Bindings các trường nhập liệu
             txtID.DataBindings.Clear();
             txtID.DataBindings.Add("Text", bs, "ID", true, DataSourceUpdateMode.Never);
 
@@ -113,7 +125,6 @@ namespace StadiumTicketBooking.Forms
             txtDiaChi.DataBindings.Clear();
             txtDiaChi.DataBindings.Add("Text", bs, "DiaChi", true, DataSourceUpdateMode.Never);
 
-            // Bindings ảnh cho PictureBox lớn
             picHinhAnh.DataBindings.Clear();
             Binding bImg = new Binding("ImageLocation", bs, "HinhAnh", true);
             bImg.Format += (s, ev) =>
@@ -121,12 +132,11 @@ namespace StadiumTicketBooking.Forms
                 if (ev.Value != null && !string.IsNullOrEmpty(ev.Value.ToString()))
                 {
                     string fullPath = Path.Combine(imagesFolder, ev.Value.ToString());
-
-                    // Kiểm tra file có tồn tại không trước khi gán để tránh lỗi X đỏ ở PictureBox
-                    if (File.Exists(fullPath))
-                        ev.Value = fullPath;
-                    else
-                        ev.Value = null;
+                    ev.Value = File.Exists(fullPath) ? fullPath : null;
+                }
+                else
+                {
+                    ev.Value = null;
                 }
             };
             picHinhAnh.DataBindings.Add(bImg);
@@ -141,14 +151,10 @@ namespace StadiumTicketBooking.Forms
                 ofd.Filter = "Images|*.jpg;*.png;*.jpeg";
                 if (ofd.ShowDialog() == DialogResult.OK)
                 {
-                    // LẤY TÊN FILE GỐC (Ví dụ: mydinh.jpg)
                     string fileName = Path.GetFileName(ofd.FileName);
                     string destPath = Path.Combine(imagesFolder, fileName);
 
-                    // Copy file vào thư mục dự án (ghi đè nếu trùng tên)
                     File.Copy(ofd.FileName, destPath, true);
-
-                    // Hiển thị lên PictureBox
                     picHinhAnh.ImageLocation = destPath;
                 }
             }
@@ -164,10 +170,9 @@ namespace StadiumTicketBooking.Forms
 
             try
             {
-                // Fix lỗi: Kiểm tra xem có ảnh chưa, nếu chưa có thì cho fileName rỗng thay vì văng lỗi Exception
                 string fileNameOnly = string.IsNullOrEmpty(picHinhAnh.ImageLocation)
-                                      ? ""
-                                      : Path.GetFileName(picHinhAnh.ImageLocation);
+                    ? ""
+                    : Path.GetFileName(picHinhAnh.ImageLocation);
 
                 if (xuLyThem)
                 {
@@ -186,7 +191,6 @@ namespace StadiumTicketBooking.Forms
                     {
                         svd.TenSan = txtTenSan.Text;
                         svd.DiaChi = txtDiaChi.Text;
-                        // Nếu đổi ảnh mới thì update, không thì giữ nguyên ảnh cũ
                         svd.HinhAnh = string.IsNullOrEmpty(fileNameOnly) ? svd.HinhAnh : fileNameOnly;
                     }
                 }
@@ -196,7 +200,10 @@ namespace StadiumTicketBooking.Forms
                 LoadDataGrid();
                 BatTatChucNang(false);
             }
-            catch (Exception ex) { MessageBox.Show("Lỗi: " + ex.Message); }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Lỗi: " + ex.Message);
+            }
         }
 
         private void btnThem_Click(object sender, EventArgs e)
@@ -214,19 +221,21 @@ namespace StadiumTicketBooking.Forms
         private void btnSua_Click(object sender, EventArgs e)
         {
             if (dgvSanVanDong.CurrentRow == null) return;
+
             xuLyThem = false;
             BatTatChucNang(true);
-            currentId = (int)dgvSanVanDong.CurrentRow.Cells["colID"].Value;
+            currentId = Convert.ToInt32(dgvSanVanDong.CurrentRow.Cells["colID"].Value);
         }
 
         private void btnXoa_Click(object sender, EventArgs e)
         {
             if (dgvSanVanDong.CurrentRow == null) return;
 
-            int idXoa = (int)dgvSanVanDong.CurrentRow.Cells["colID"].Value;
-            string tenSan = dgvSanVanDong.CurrentRow.Cells["colTenSan"].Value.ToString();
+            int idXoa = Convert.ToInt32(dgvSanVanDong.CurrentRow.Cells["colID"].Value);
+            string tenSan = dgvSanVanDong.CurrentRow.Cells["colTenSan"].Value?.ToString() ?? "";
 
-            if (MessageBox.Show($"Xác nhận xóa sân: {tenSan}?", "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            if (MessageBox.Show($"Xác nhận xóa sân: {tenSan}?", "Xác nhận",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
                 var svd = context.SanVanDong.Find(idXoa);
                 if (svd != null)
@@ -241,6 +250,7 @@ namespace StadiumTicketBooking.Forms
         private void btnHuy_Click(object sender, EventArgs e)
         {
             LoadDataGrid();
+            BatTatChucNang(false);
         }
 
         private void btnThoat_Click(object sender, EventArgs e)
